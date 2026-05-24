@@ -1,0 +1,13 @@
+[build]
+builder = "dockerfile"
+buildCommand = "npm run build:railway"
+
+[deploy]
+startCommand = "npm run start:prod"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 5
+
+[[services]]
+name = "teesa-api"

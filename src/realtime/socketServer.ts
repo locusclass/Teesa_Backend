@@ -10,12 +10,27 @@ const userSockets = new Map<string, Set<string>>()
 const driverSockets = new Set<string>()
 
 export function setupRealtime(httpServer: HttpServer) {
+  const corsOrigin = env.CORS_ORIGINS.trim() === '*'
+    ? true
+    : env.CORS_ORIGINS.split(',').map(o => o.trim())
+
   io = new SocketIOServer(httpServer, {
     cors: {
-      origin: env.CORS_ORIGINS.split(',').map(o => o.trim()),
+      origin: corsOrigin,
       credentials: true,
     },
+    // Railway's proxy has a 30s idle timeout for WebSocket connections.
+    // pingInterval must be < 30s so the ping keeps the connection alive.
+    pingInterval: 20000,
+    pingTimeout: 25000,
+    // Allow both transports; Railway supports native WebSockets
     transports: ['websocket', 'polling'],
+    // Allow clients 60s to reconnect before dropping their room state
+    connectTimeout: 60000,
+    // Railway proxy sets X-Forwarded-For; trust it for accurate IP
+    allowRequest: (req, callback) => {
+      callback(null, true)
+    },
   })
 
   io.use(async (socket: Socket, next) => {

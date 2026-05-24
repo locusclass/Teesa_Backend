@@ -1,0 +1,17 @@
+# Nixpacks build config — used by Railway if you set builder to "nixpacks"
+# instead of "dockerfile" in railway.toml. Both work; Dockerfile is the default.
+
+[phases.setup]
+nixPkgs = ["nodejs_20"]
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = [
+  "npx prisma generate",
+  "npm run build"
+]
+
+[start]
+cmd = "npx prisma migrate deploy && node dist/server.js"

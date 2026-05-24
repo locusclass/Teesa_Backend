@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment — never commit secrets
+.env
+.env.local
+.env.production
+
+# GCP service account key
+gcp-key.json
+*.json.key
+
+# Local uploads (use GCS in production)
+uploads/
+
+# Logs
+*.log
+logs/
+
+# Prisma
+prisma/migrations/dev_*/
+
+# TypeScript
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
