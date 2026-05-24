@@ -5,7 +5,7 @@ buildCommand = "npm run build:railway"
 [deploy]
 startCommand = "npm run start:prod"
 healthcheckPath = "/health"
-healthcheckTimeout = 30
+healthcheckTimeout = 60
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 5
 

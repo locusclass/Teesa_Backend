@@ -1,7 +1,14 @@
 # ── Build stage ──────────────────────────────────────────────────────────────
-FROM node:20-alpine AS builder
+# Use Debian-based Node images for Prisma on Railway. Prisma 5.x is much more
+# reliable here than on recent Alpine variants, which can miss the expected
+# libssl/OpenSSL runtime and fail during `prisma migrate deploy`.
+FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
 # Install deps first (cached layer unless package.json changes)
 COPY package*.json ./
@@ -17,10 +24,12 @@ COPY src ./src
 RUN npm run build
 
 # ── Production stage ──────────────────────────────────────────────────────────
-FROM node:20-alpine AS runner
+FROM node:20-bookworm-slim AS runner
 
 # dumb-init handles signals properly so Railway SIGTERM reaches Node
-RUN apk add --no-cache dumb-init
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends dumb-init openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
