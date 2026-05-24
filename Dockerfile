@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Install deps first (cached layer unless package.json changes)
 COPY package*.json ./
-RUN npm ci --ignore-scripts
+RUN npm install --ignore-scripts
 
 # Copy prisma schema and generate client
 COPY prisma ./prisma
