@@ -1,5 +1,5 @@
 import { prisma } from '../db/client'
-import { NotificationType } from '@prisma/client'
+import { NotificationType, Prisma } from '@prisma/client'
 import { emitToUser } from '../realtime/socketServer'
 
 interface CreateNotificationInput {
@@ -18,7 +18,7 @@ export class NotificationService {
         type: input.type,
         title: input.title,
         body: input.body,
-        data: input.data,
+        data: input.data as Prisma.InputJsonValue | undefined,
       },
     })
 

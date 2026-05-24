@@ -164,7 +164,6 @@ async function main() {
         seats: vs.seats,
         cargoCapacity: vs.cargoCapacity,
         truckType: vs.truckType,
-        bodyType: vs.bodyType,
         verificationStatus: VehicleStatus.APPROVED,
       },
     })

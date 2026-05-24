@@ -12,7 +12,8 @@ export function signAccessToken(userId: string, role: UserRole): string {
   return jwt.sign(
     { sub: userId, role, type: 'access' },
     env.JWT_SECRET,
-    { expiresIn: env.ACCESS_TOKEN_TTL as string }
+    // jsonwebtoken's expiresIn expects ms.StringValue; cast through unknown to satisfy strict TS
+    { expiresIn: env.ACCESS_TOKEN_TTL as unknown as number }
   )
 }
 
@@ -20,7 +21,7 @@ export function signRefreshToken(userId: string, role: UserRole): string {
   return jwt.sign(
     { sub: userId, role, type: 'refresh' },
     env.JWT_REFRESH_SECRET,
-    { expiresIn: env.REFRESH_TOKEN_TTL as string }
+    { expiresIn: env.REFRESH_TOKEN_TTL as unknown as number }
   )
 }
 

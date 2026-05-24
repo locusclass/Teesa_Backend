@@ -35,7 +35,10 @@ export async function authRoutes(app: FastifyInstance) {
         phone: string; fullName: string; otp: string;
         email?: string; password?: string; role?: string
       }
-      const result = await authService.registerWithOtp(body, body.otp)
+      const result = await authService.registerWithOtp(
+        { ...body, role: body.role as import('@prisma/client').UserRole | undefined },
+        body.otp,
+      )
       return reply.code(201).send(success(result, 'Registration successful'))
     } catch (err: unknown) {
       return reply.code(400).send(error((err as Error).message))
