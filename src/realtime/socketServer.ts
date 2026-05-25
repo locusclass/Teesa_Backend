@@ -3,11 +3,13 @@ import { Server as HttpServer } from 'http'
 import jwt from 'jsonwebtoken'
 import { env } from '../config/env'
 import { prisma } from '../db/client'
+import { haversineDistance } from '../integrations/maps'
 
 let io: SocketIOServer | null = null
 
 const userSockets = new Map<string, Set<string>>()
 const driverSockets = new Set<string>()
+const locationRecordTimestamps = new Map<string, number>()
 
 export function setupRealtime(httpServer: HttpServer) {
   const corsOrigin = env.CORS_ORIGINS.trim() === '*'
@@ -15,28 +17,17 @@ export function setupRealtime(httpServer: HttpServer) {
     : env.CORS_ORIGINS.split(',').map(o => o.trim())
 
   io = new SocketIOServer(httpServer, {
-    cors: {
-      origin: corsOrigin,
-      credentials: true,
-    },
-    // Railway's proxy has a 30s idle timeout for WebSocket connections.
-    // pingInterval must be < 30s so the ping keeps the connection alive.
+    cors: { origin: corsOrigin, credentials: true },
     pingInterval: 20000,
     pingTimeout: 25000,
-    // Allow both transports; Railway supports native WebSockets
     transports: ['websocket', 'polling'],
-    // Allow clients 60s to reconnect before dropping their room state
     connectTimeout: 60000,
-    // Railway proxy sets X-Forwarded-For; trust it for accurate IP
-    allowRequest: (req, callback) => {
-      callback(null, true)
-    },
+    allowRequest: (_req, callback) => callback(null, true),
   })
 
   io.use(async (socket: Socket, next) => {
     const token = socket.handshake.auth.token as string
     if (!token) return next(new Error('Authentication required'))
-
     try {
       const payload = jwt.verify(token, env.JWT_SECRET) as { sub: string; role: string; type: string }
       if (payload.type !== 'access') return next(new Error('Invalid token'))
@@ -60,50 +51,127 @@ export function setupRealtime(httpServer: HttpServer) {
     if (role === 'DRIVER' || role === 'VEHICLE_OWNER') {
       socket.join('drivers')
       driverSockets.add(socket.id)
+
+      // Restore driver to active booking room if they have one
+      const dp = await prisma.driverProfile.findUnique({ where: { userId } })
+      if (dp) {
+        const activeBooking = await prisma.booking.findFirst({
+          where: {
+            driverId: dp.id,
+            status: { in: ['DRIVER_ASSIGNED', 'DRIVER_EN_ROUTE', 'DRIVER_ARRIVED', 'IN_PROGRESS'] },
+          },
+          select: { id: true },
+        })
+        if (activeBooking) socket.join(`booking:${activeBooking.id}`)
+      }
     }
 
     if (role === 'ADMIN' || role === 'SUPER_ADMIN') {
       socket.join('admins')
     }
 
-    socket.on('driver:location', async (data: { lat: number; lng: number; bookingId?: string }) => {
+    // Passenger joins their active booking room
+    if (role === 'PASSENGER') {
+      const activeBooking = await prisma.booking.findFirst({
+        where: {
+          passengerId: userId,
+          status: { in: ['DRIVER_ASSIGNED', 'DRIVER_EN_ROUTE', 'DRIVER_ARRIVED', 'IN_PROGRESS'] },
+        },
+        select: { id: true },
+      })
+      if (activeBooking) socket.join(`booking:${activeBooking.id}`)
+    }
+
+    socket.on('driver:location', async (data: {
+      lat: number
+      lng: number
+      bookingId?: string
+      heading?: number
+      speed?: number
+    }) => {
       try {
         await prisma.driverProfile.updateMany({
           where: { userId },
           data: { currentLat: data.lat, currentLng: data.lng },
         })
+
         const dp = await prisma.driverProfile.findUnique({ where: { userId } })
-        if (dp) {
+        if (!dp) return
+
+        // Rate-limit DB writes to once per 30s per driver
+        const now = Date.now()
+        const lastRecord = locationRecordTimestamps.get(dp.id) || 0
+        if (now - lastRecord > 30_000) {
           await prisma.driverLocation.create({
-            data: { driverProfileId: dp.id, lat: data.lat, lng: data.lng },
+            data: {
+              driverProfileId: dp.id,
+              lat: data.lat,
+              lng: data.lng,
+              heading: data.heading,
+              speed: data.speed,
+              bookingId: data.bookingId,
+            },
           })
-          if (data.bookingId) {
-            const booking = await prisma.booking.findUnique({ where: { id: data.bookingId } })
-            if (booking) {
-              io?.to(`user:${booking.passengerId}`).emit('driver:location_update', {
-                bookingId: data.bookingId,
-                lat: data.lat,
-                lng: data.lng,
-              })
-            }
-          }
-          io?.to('admins').emit('driver:location_update', {
-            driverProfileId: dp.id,
-            lat: data.lat,
-            lng: data.lng,
-          })
+          locationRecordTimestamps.set(dp.id, now)
         }
+
+        if (data.bookingId) {
+          socket.join(`booking:${data.bookingId}`)
+
+          const booking = await prisma.booking.findUnique({
+            where: { id: data.bookingId },
+            select: { passengerId: true, status: true, pickupLat: true, pickupLng: true, destLat: true, destLng: true },
+          })
+
+          if (booking) {
+            let etaMinutes: number | undefined
+
+            const avgSpeedKmh = 30
+            if (['DRIVER_ASSIGNED', 'DRIVER_EN_ROUTE'].includes(booking.status) &&
+                booking.pickupLat && booking.pickupLng) {
+              const dist = haversineDistance(data.lat, data.lng, booking.pickupLat, booking.pickupLng)
+              etaMinutes = Math.max(1, Math.round((dist / avgSpeedKmh) * 60))
+            } else if (booking.status === 'IN_PROGRESS' && booking.destLat && booking.destLng) {
+              const dist = haversineDistance(data.lat, data.lng, booking.destLat, booking.destLng)
+              etaMinutes = Math.max(1, Math.round((dist / avgSpeedKmh) * 60))
+            }
+
+            io?.to(`user:${booking.passengerId}`).emit('driver:location_update', {
+              bookingId: data.bookingId,
+              lat: data.lat,
+              lng: data.lng,
+              heading: data.heading,
+              etaMinutes,
+            })
+          }
+        }
+
+        io?.to('admins').emit('driver:location_update', {
+          driverProfileId: dp.id,
+          driverUserId: userId,
+          lat: data.lat,
+          lng: data.lng,
+          heading: data.heading,
+        })
       } catch (err) {
         console.error('Location update error:', err)
       }
     })
 
     socket.on('driver:online', async () => {
-      await prisma.driverProfile.updateMany({ where: { userId }, data: { isOnline: true } })
+      try {
+        await prisma.driverProfile.updateMany({ where: { userId }, data: { isOnline: true } })
+      } catch {}
     })
 
     socket.on('driver:offline', async () => {
-      await prisma.driverProfile.updateMany({ where: { userId }, data: { isOnline: false } })
+      try {
+        await prisma.driverProfile.updateMany({ where: { userId }, data: { isOnline: false } })
+      } catch {}
+    })
+
+    socket.on('passenger:join_booking', (data: { bookingId: string }) => {
+      if (data.bookingId) socket.join(`booking:${data.bookingId}`)
     })
 
     socket.on('disconnect', () => {
@@ -116,26 +184,24 @@ export function setupRealtime(httpServer: HttpServer) {
     })
   })
 
-  console.log('🔌 Socket.IO realtime server ready')
+  console.log('Socket.IO realtime server ready')
   return io
 }
 
 export function emitToUser(userId: string, event: string, data: unknown) {
-  if (io) {
-    io.to(`user:${userId}`).emit(event, data)
-  }
+  io?.to(`user:${userId}`).emit(event, data)
 }
 
 export function emitToDrivers(event: string, data: unknown) {
-  if (io) {
-    io.to('drivers').emit(event, data)
-  }
+  io?.to('drivers').emit(event, data)
 }
 
 export function emitToAdmins(event: string, data: unknown) {
-  if (io) {
-    io.to('admins').emit(event, data)
-  }
+  io?.to('admins').emit(event, data)
+}
+
+export function emitToBooking(bookingId: string, event: string, data: unknown) {
+  io?.to(`booking:${bookingId}`).emit(event, data)
 }
 
 export function getIO() {

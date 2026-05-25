@@ -38,6 +38,37 @@ export async function bookingRoutes(app: FastifyInstance) {
     }
   })
 
+  // Active booking for current passenger
+  app.get('/active', {
+    preHandler: authenticate,
+    schema: { tags: ['Bookings'], description: 'Get active booking for current user', security: [{ Bearer: [] }] },
+  }, async (req, reply) => {
+    try {
+      const user = req.user as JwtPayload
+      const booking = await bookingService.getActiveBooking(user.sub)
+      return reply.send(success(booking))
+    } catch (err: unknown) {
+      return reply.code(400).send(error((err as Error).message))
+    }
+  })
+
+  // Active booking for driver
+  app.get('/driver/active', {
+    preHandler: authenticate,
+    schema: { tags: ['Bookings'], description: 'Get active booking for current driver', security: [{ Bearer: [] }] },
+  }, async (req, reply) => {
+    try {
+      const user = req.user as JwtPayload
+      const { prisma } = await import('../db/client')
+      const dp = await prisma.driverProfile.findUnique({ where: { userId: user.sub } })
+      if (!dp) return reply.code(404).send(error('Driver profile not found'))
+      const booking = await bookingService.getActiveDriverBooking(dp.id)
+      return reply.send(success(booking))
+    } catch (err: unknown) {
+      return reply.code(400).send(error((err as Error).message))
+    }
+  })
+
   app.get('/', {
     preHandler: authenticate,
     schema: { tags: ['Bookings'], description: 'List bookings for current user', security: [{ Bearer: [] }] },
@@ -95,14 +126,29 @@ export async function bookingRoutes(app: FastifyInstance) {
 
   app.patch('/:id/accept-driver', {
     preHandler: authenticate,
-    schema: { tags: ['Bookings'], description: 'Accept a driver for instant booking', security: [{ Bearer: [] }] },
+    schema: { tags: ['Bookings'], description: 'Accept a driver for booking', security: [{ Bearer: [] }] },
   }, async (req, reply) => {
     try {
-      const user = req.user as JwtPayload
       const { id } = req.params as { id: string }
       const { driverProfileId, offerId } = req.body as { driverProfileId: string; offerId?: string }
       const updated = await bookingService.acceptDriver(id, driverProfileId, offerId)
       return reply.send(success(updated))
+    } catch (err: unknown) {
+      return reply.code(400).send(error((err as Error).message))
+    }
+  })
+
+  // SOS alert endpoint
+  app.post('/:id/sos', {
+    preHandler: authenticate,
+    schema: { tags: ['Bookings'], description: 'Trigger SOS safety alert', security: [{ Bearer: [] }] },
+  }, async (req, reply) => {
+    try {
+      const user = req.user as JwtPayload
+      const { id } = req.params as { id: string }
+      const { lat, lng } = (req.body as { lat?: number; lng?: number }) || {}
+      const result = await bookingService.triggerSOS(id, user.sub, lat, lng)
+      return reply.send(success(result, 'SOS alert sent'))
     } catch (err: unknown) {
       return reply.code(400).send(error((err as Error).message))
     }
