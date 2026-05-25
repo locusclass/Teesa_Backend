@@ -11,6 +11,18 @@
 1. In your project → **+ New** → **Database** → **Add PostgreSQL**
 2. Railway injects `DATABASE_URL` into your service automatically — no manual copy needed
 
+## 2b. Add Object Storage (file uploads)
+
+1. In your project → **+ New** → **Storage** → **Object Storage**
+2. Railway automatically injects four variables into your service:
+   - `RAILWAY_OBJECT_STORAGE_ENDPOINT`
+   - `RAILWAY_OBJECT_STORAGE_ACCESS_KEY_ID`
+   - `RAILWAY_OBJECT_STORAGE_SECRET_ACCESS_KEY`
+   - `RAILWAY_OBJECT_STORAGE_BUCKET_NAME`
+3. No manual configuration needed — the backend detects them and switches from local-disk to Object Storage automatically.
+
+> Without Object Storage, the backend falls back to saving files on the container's local disk, which is erased on every deploy. Add Object Storage before going live.
+
 ## 3. Set Environment Variables
 
 In your service → **Variables** tab, add:
@@ -33,9 +45,10 @@ Run twice — once for each secret.
 | Variable | Purpose |
 |---|---|
 | `GOOGLE_MAPS_API_KEY` | Distance calculation (falls back to Haversine without it) |
-| `GCS_BUCKET` + `GCP_PROJECT_ID` | File uploads (falls back to local disk without them) |
 | `AT_API_KEY` + `AT_USERNAME` | Africa's Talking SMS (logs OTPs to console without it) |
 | `SMS_PROVIDER` | Set to `africas_talking` when AT keys are added |
+
+> **Object Storage variables are auto-injected** — see section 2b below. Do not set them manually.
 
 > **Do NOT set `PORT`** — Railway injects it automatically.
 
@@ -66,10 +79,10 @@ This creates the default admin, test users, transport categories, and pricing ru
 
 ## 6. Verify
 
-Your API will be live at:
+Your API is live at:
 ```
-https://<your-project>.up.railway.app/health
-https://<your-project>.up.railway.app/docs
+https://teesabackend-production.up.railway.app/health
+https://teesabackend-production.up.railway.app/docs
 ```
 
 The `/health` endpoint returns `{"status":"ok"}` when everything is running.
@@ -78,13 +91,13 @@ The `/health` endpoint returns `{"status":"ok"}` when everything is running.
 
 Update your Flutter apps' `API_BASE_URL`:
 ```
-https://<your-project>.up.railway.app/api/v1
+https://teesabackend-production.up.railway.app/api/v1
 ```
 
 Pass it at build time:
 ```bash
-flutter build apk --dart-define=API_BASE_URL=https://<your-project>.up.railway.app/api/v1
-flutter run --dart-define=API_BASE_URL=https://<your-project>.up.railway.app/api/v1
+flutter build apk --dart-define=API_BASE_URL=https://teesabackend-production.up.railway.app/api/v1
+flutter run --dart-define=API_BASE_URL=https://teesabackend-production.up.railway.app/api/v1
 ```
 
 ## 8. Custom Domain (optional)

@@ -24,9 +24,11 @@ const envSchema = z.object({
 
   // Optional integrations — app falls back to mocks when not set
   GOOGLE_MAPS_API_KEY: z.string().optional(),
-  GCS_BUCKET: z.string().optional(),
-  GCP_PROJECT_ID: z.string().optional(),
-  GCP_KEY_FILE: z.string().optional(),
+  // Railway Object Storage — auto-injected when you add the Object Storage service in Railway
+  RAILWAY_OBJECT_STORAGE_ENDPOINT: z.string().url().optional(),
+  RAILWAY_OBJECT_STORAGE_ACCESS_KEY_ID: z.string().optional(),
+  RAILWAY_OBJECT_STORAGE_SECRET_ACCESS_KEY: z.string().optional(),
+  RAILWAY_OBJECT_STORAGE_BUCKET_NAME: z.string().optional(),
 
   SMS_PROVIDER: z.string().default('mock'),
   AT_USERNAME: z.string().optional(),
