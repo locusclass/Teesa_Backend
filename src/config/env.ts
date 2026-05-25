@@ -22,8 +22,6 @@ const envSchema = z.object({
   // In Railway: set to your Flutter web app's Railway URL + any custom domains
   CORS_ORIGINS: z.string().default('*'),
 
-  // Optional integrations — app falls back to mocks when not set
-  GOOGLE_MAPS_API_KEY: z.string().optional(),
   // Railway Object Storage — auto-injected when you add the Object Storage service in Railway
   RAILWAY_OBJECT_STORAGE_ENDPOINT: z.string().url().optional(),
   RAILWAY_OBJECT_STORAGE_ACCESS_KEY_ID: z.string().optional(),

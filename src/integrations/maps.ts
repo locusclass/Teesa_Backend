@@ -1,4 +1,6 @@
-import { env } from '../config/env'
+// Distance/duration via OSRM (OpenStreetMap routing) — no API key required.
+// Public demo server: router.project-osrm.org
+// For high-volume production use, self-host OSRM or switch to OpenRouteService.
 
 export interface DistanceResult {
   distanceKm: number
@@ -7,36 +9,41 @@ export interface DistanceResult {
   durationText: string
 }
 
+const OSRM_BASE = 'https://router.project-osrm.org/route/v1/driving'
+
 export async function getDistanceAndDuration(
   originLat: number,
   originLng: number,
   destLat: number,
   destLng: number
 ): Promise<DistanceResult> {
-  if (!env.GOOGLE_MAPS_API_KEY) {
-    return estimateDistance(originLat, originLng, destLat, destLng)
-  }
-
   try {
-    const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${originLat},${originLng}&destinations=${destLat},${destLng}&mode=driving&key=${env.GOOGLE_MAPS_API_KEY}`
-    const response = await fetch(url)
+    // OSRM uses lng,lat order (opposite of Google Maps)
+    const url = `${OSRM_BASE}/${originLng},${originLat};${destLng},${destLat}?overview=false`
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'TeesaApp/1.0' },
+      signal: AbortSignal.timeout(5000),
+    })
     const data = await response.json() as {
-      rows: Array<{ elements: Array<{ distance: { value: number; text: string }; duration: { value: number; text: string }; status: string }> }>
+      code: string
+      routes: Array<{ distance: number; duration: number }>
     }
-    const element = data.rows[0]?.elements[0]
-    if (element?.status === 'OK') {
+    if (data.code === 'Ok' && data.routes.length > 0) {
+      const route = data.routes[0]
+      const distanceKm = Math.round((route.distance / 1000) * 10) / 10
+      const durationMinutes = Math.ceil(route.duration / 60)
       return {
-        distanceKm: element.distance.value / 1000,
-        durationMinutes: Math.ceil(element.duration.value / 60),
-        distanceText: element.distance.text,
-        durationText: element.duration.text,
+        distanceKm,
+        durationMinutes,
+        distanceText: `${distanceKm} km`,
+        durationText: `${durationMinutes} min`,
       }
     }
-  } catch (err) {
-    console.error('Google Maps API error:', err)
+  } catch {
+    // Network error or timeout — fall through to Haversine estimate
   }
 
-  return estimateDistance(originLat, originLng, destLat, destLng)
+  return haversineEstimate(originLat, originLng, destLat, destLng)
 }
 
 export function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -50,26 +57,12 @@ export function haversineDistance(lat1: number, lng1: number, lat2: number, lng2
   return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 10) / 10
 }
 
-function estimateDistance(
-  lat1: number, lng1: number,
-  lat2: number, lng2: number
-): DistanceResult {
-  const R = 6371
-  const dLat = ((lat2 - lat1) * Math.PI) / 180
-  const dLon = ((lng2 - lng1) * Math.PI) / 180
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2)
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-  const distanceKm = R * c
-
+function haversineEstimate(lat1: number, lng1: number, lat2: number, lng2: number): DistanceResult {
+  const distanceKm = haversineDistance(lat1, lng1, lat2, lng2)
   return {
-    distanceKm: Math.round(distanceKm * 10) / 10,
+    distanceKm,
     durationMinutes: Math.round((distanceKm / 40) * 60),
-    distanceText: `${distanceKm.toFixed(1)} km`,
-    durationText: `${Math.round((distanceKm / 40) * 60)} mins`,
+    distanceText: `${distanceKm} km`,
+    durationText: `${Math.round((distanceKm / 40) * 60)} min`,
   }
 }

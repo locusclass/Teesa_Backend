@@ -44,7 +44,6 @@ Run twice — once for each secret.
 
 | Variable | Purpose |
 |---|---|
-| `GOOGLE_MAPS_API_KEY` | Distance calculation (falls back to Haversine without it) |
 | `AT_API_KEY` + `AT_USERNAME` | Africa's Talking SMS (logs OTPs to console without it) |
 | `SMS_PROVIDER` | Set to `africas_talking` when AT keys are added |
 
