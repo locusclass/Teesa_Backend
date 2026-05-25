@@ -40,6 +40,9 @@ const envSchema = z.object({
   // Railway Redis plugin sets this automatically when you add the Redis service
   REDIS_URL: z.string().url().optional(),
 
+  // Firebase Admin — paste the full service account JSON (minified) as this env var
+  FIREBASE_SERVICE_ACCOUNT_JSON: z.string().optional(),
+
   // Admin bootstrap
   ADMIN_BOOTSTRAP_EMAIL: z.string().email().default('admin@teesa.ug'),
   ADMIN_BOOTSTRAP_PHONE: z.string().default('+256700000000'),
