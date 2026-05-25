@@ -21,7 +21,7 @@ describe('Auth routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/v1/auth/send-otp',
-        payload: { phone: '+256700000001' },
+        payload: { phone: '+256700000001', purpose: 'login' },
       });
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.body);

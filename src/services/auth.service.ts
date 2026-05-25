@@ -21,51 +21,67 @@ export interface LoginInput {
 
 export class AuthService {
   async sendOtp(phone: string, purpose: string) {
-    let user = await prisma.user.findUnique({ where: { phone } })
-    const code = await createOtp(phone, purpose, user?.id)
-    await sendOtpSms(phone, code)
+    const normalizedPhone = this.normalizePhone(phone)
+    const user = await prisma.user.findUnique({ where: { phone: normalizedPhone } })
+    const code = await createOtp(normalizedPhone, purpose, user?.id)
+    await sendOtpSms(normalizedPhone, code)
     return { sent: true }
   }
 
   async registerWithOtp(input: RegisterInput, otp: string) {
-    const verified = await verifyOtp(input.phone, otp, 'register')
+    const normalized = this.normalizeRegisterInput(input)
+    const verified = await verifyOtp(normalized.phone, otp, 'register')
     if (!verified) throw new Error('Invalid or expired OTP')
 
-    const existing = await prisma.user.findUnique({ where: { phone: input.phone } })
-    if (existing) throw new Error('Phone number already registered')
-
-    const passwordHash = input.password ? await bcrypt.hash(input.password, 12) : undefined
+    await this.ensureRegistrationAvailable(normalized.phone, normalized.email)
+    const passwordHash = normalized.password ? await bcrypt.hash(normalized.password, 12) : undefined
 
     const user = await prisma.user.create({
       data: {
-        phone: input.phone,
-        fullName: input.fullName,
-        email: input.email,
+        phone: normalized.phone,
+        fullName: normalized.fullName,
+        email: normalized.email,
         passwordHash,
-        role: input.role || UserRole.PASSENGER,
+        role: normalized.role,
         accountStatus: AccountStatus.ACTIVE,
       },
     })
 
     await prisma.wallet.create({ data: { userId: user.id, balance: 0, currency: 'UGX' } })
+    return this.createSession(user)
+  }
 
-    const accessToken = signAccessToken(user.id, user.role)
-    const refreshToken = signRefreshToken(user.id, user.role)
-    await prisma.authSession.create({
+  async registerWithPassword(input: RegisterInput) {
+    const normalized = this.normalizeRegisterInput(input)
+    if (!normalized.password || normalized.password.length < 6) {
+      throw new Error('Password must be at least 6 characters')
+    }
+
+    await this.ensureRegistrationAvailable(normalized.phone, normalized.email)
+    const passwordHash = await bcrypt.hash(normalized.password, 12)
+
+    const user = await prisma.user.create({
       data: {
-        userId: user.id,
-        refreshToken,
-        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        phone: normalized.phone,
+        fullName: normalized.fullName,
+        email: normalized.email,
+        passwordHash,
+        role: normalized.role,
+        accountStatus: AccountStatus.ACTIVE,
       },
     })
 
-    return { accessToken, refreshToken, user: this.sanitizeUser(user) }
+    await prisma.wallet.create({ data: { userId: user.id, balance: 0, currency: 'UGX' } })
+    return this.createSession(user)
   }
 
   async loginWithPassword(input: LoginInput) {
-    const user = input.phone
-      ? await prisma.user.findUnique({ where: { phone: input.phone } })
-      : await prisma.user.findUnique({ where: { email: input.email } })
+    const phone = input.phone ? this.normalizePhone(input.phone) : undefined
+    const email = this.normalizeEmail(input.email)
+    if (!phone && !email) throw new Error('Email or phone is required')
+    const user = phone
+      ? await prisma.user.findUnique({ where: { phone } })
+      : await prisma.user.findUnique({ where: { email } })
 
     if (!user) throw new Error('Invalid credentials')
     if (!user.passwordHash || !input.password) throw new Error('Password not set')
@@ -73,7 +89,29 @@ export class AuthService {
 
     const match = await bcrypt.compare(input.password, user.passwordHash)
     if (!match) throw new Error('Invalid credentials')
+    return this.createSession(user)
+  }
 
+  async loginWithOtp(phone: string, otp: string) {
+    const normalizedPhone = this.normalizePhone(phone)
+    const verified = await verifyOtp(normalizedPhone, otp, 'login')
+    if (!verified) throw new Error('Invalid or expired OTP')
+
+    const user = await prisma.user.findUnique({ where: { phone: normalizedPhone } })
+    if (!user) throw new Error('User not found')
+    if (user.accountStatus !== AccountStatus.ACTIVE) throw new Error('Account not active')
+    return this.createSession(user)
+  }
+
+  private async createSession(user: {
+    id: string
+    phone: string
+    email: string | null
+    fullName: string
+    role: UserRole
+    accountStatus: AccountStatus
+    rating: number
+  }) {
     const accessToken = signAccessToken(user.id, user.role)
     const refreshToken = signRefreshToken(user.id, user.role)
     await prisma.authSession.create({
@@ -87,25 +125,37 @@ export class AuthService {
     return { accessToken, refreshToken, user: this.sanitizeUser(user) }
   }
 
-  async loginWithOtp(phone: string, otp: string) {
-    const verified = await verifyOtp(phone, otp, 'login')
-    if (!verified) throw new Error('Invalid or expired OTP')
+  private normalizeRegisterInput(input: RegisterInput) {
+    const fullName = input.fullName.trim()
+    if (!fullName) throw new Error('Full name is required')
+    const phone = this.normalizePhone(input.phone)
+    if (!phone) throw new Error('Phone number is required')
 
-    const user = await prisma.user.findUnique({ where: { phone } })
-    if (!user) throw new Error('User not found')
-    if (user.accountStatus !== AccountStatus.ACTIVE) throw new Error('Account not active')
+    return {
+      phone,
+      fullName,
+      email: this.normalizeEmail(input.email),
+      password: input.password?.trim(),
+      role: input.role || UserRole.PASSENGER,
+    }
+  }
 
-    const accessToken = signAccessToken(user.id, user.role)
-    const refreshToken = signRefreshToken(user.id, user.role)
-    await prisma.authSession.create({
-      data: {
-        userId: user.id,
-        refreshToken,
-        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-      },
-    })
+  private async ensureRegistrationAvailable(phone: string, email?: string) {
+    const existingPhone = await prisma.user.findUnique({ where: { phone } })
+    if (existingPhone) throw new Error('Phone number already registered')
 
-    return { accessToken, refreshToken, user: this.sanitizeUser(user) }
+    if (!email) return
+    const existingEmail = await prisma.user.findUnique({ where: { email } })
+    if (existingEmail) throw new Error('Email address already registered')
+  }
+
+  private normalizePhone(phone: string) {
+    return phone.replace(/\s+/g, '').trim()
+  }
+
+  private normalizeEmail(email?: string) {
+    const normalized = email?.trim().toLowerCase()
+    return normalized ? normalized : undefined
   }
 
   async refreshTokens(token: string) {

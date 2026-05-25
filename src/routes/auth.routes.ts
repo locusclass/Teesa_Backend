@@ -47,6 +47,31 @@ export async function authRoutes(app: FastifyInstance) {
     }
   })
 
+  app.post('/register/password', {
+    schema: {
+      tags: ['Auth'],
+      description: 'Register a new user with details and password only',
+      body: { type: 'object', required: ['phone', 'fullName', 'password'], properties: {
+        phone: { type: 'string' }, fullName: { type: 'string' },
+        email: { type: 'string' }, password: { type: 'string' }, role: { type: 'string' }
+      }},
+    },
+  }, async (req, reply) => {
+    try {
+      const body = req.body as {
+        phone: string; fullName: string; password: string;
+        email?: string; role?: string
+      }
+      const result = await authService.registerWithPassword({
+        ...body,
+        role: body.role as import('@prisma/client').UserRole | undefined,
+      })
+      return reply.code(201).send(success(result, 'Registration successful'))
+    } catch (err: unknown) {
+      return reply.code(400).send(error((err as Error).message))
+    }
+  })
+
   app.post('/login/password', {
     schema: { tags: ['Auth'], description: 'Login with phone/email and password' },
   }, async (req, reply) => {
@@ -94,7 +119,8 @@ export async function authRoutes(app: FastifyInstance) {
 
       const { verifyFirebaseToken } = await import('../integrations/firebase-admin')
       const decoded = await verifyFirebaseToken(idToken)
-      const phone = decoded.phone_number
+      const phone = decoded.phone_number?.replace(/\s+/g, '').trim()
+      const normalizedEmail = email?.trim().toLowerCase()
 
       if (!phone) {
         return reply.code(400).send(error('Firebase token contains no phone number'))
@@ -107,18 +133,17 @@ export async function authRoutes(app: FastifyInstance) {
         user = await prisma.user.create({
           data: {
             phone,
-            fullName: fullName || 'Teesa User',
-            email: email || undefined,
+            fullName: fullName?.trim() || 'Teesa User',
+            email: normalizedEmail || undefined,
             role: userRole,
             accountStatus: AccountStatus.ACTIVE,
-            isVerified: true,
           },
         })
         await prisma.wallet.create({ data: { userId: user.id, balance: 0, currency: 'UGX' } })
       }
 
-      const accessToken  = signAccessToken({ sub: user.id, role: user.role })
-      const refreshToken = signRefreshToken({ sub: user.id, role: user.role })
+      const accessToken  = signAccessToken(user.id, user.role)
+      const refreshToken = signRefreshToken(user.id, user.role)
 
       await prisma.authSession.create({
         data: {
