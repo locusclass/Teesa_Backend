@@ -24,8 +24,8 @@ export async function authRoutes(app: FastifyInstance) {
   app.post('/register', {
     schema: {
       tags: ['Auth'],
-      description: 'Register a new user with OTP verification',
-      body: { type: 'object', required: ['phone', 'fullName', 'otp'], properties: {
+      description: 'Register a new user. Password registration does not require OTP.',
+      body: { type: 'object', required: ['phone', 'fullName'], properties: {
         phone: { type: 'string' }, fullName: { type: 'string' },
         email: { type: 'string' }, password: { type: 'string' },
         otp: { type: 'string' }, role: { type: 'string' }
@@ -34,13 +34,13 @@ export async function authRoutes(app: FastifyInstance) {
   }, async (req, reply) => {
     try {
       const body = req.body as {
-        phone: string; fullName: string; otp: string;
+        phone: string; fullName: string; otp?: string;
         email?: string; password?: string; role?: string
       }
-      const result = await authService.registerWithOtp(
-        { ...body, role: body.role as import('@prisma/client').UserRole | undefined },
-        body.otp,
-      )
+      const input = { ...body, role: body.role as import('@prisma/client').UserRole | undefined }
+      const result = body.otp
+        ? await authService.registerWithOtp(input, body.otp)
+        : await authService.registerWithPassword(input)
       return reply.code(201).send(success(result, 'Registration successful'))
     } catch (err: unknown) {
       return reply.code(400).send(error((err as Error).message))
